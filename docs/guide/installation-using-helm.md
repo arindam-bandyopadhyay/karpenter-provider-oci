@@ -1,15 +1,24 @@
 # Install KPO Helm Chart
 
-These commands assume you are installing from a checkout of this repository (the chart path is `./chart`).
-If you are installing from a packaged chart archive, replace `./chart` with the path to the `.tgz` you are using.
+KPO releases publish the Helm chart to the project Helm repository. Release tags use a leading `v`, but Helm chart versions use SemVer without the `v` prefix.
 
 KPO’s Helm chart supports a wide range of configuration. To view all available values:
 
 ```shell
-helm show values ./chart
+helm repo add karpenter-provider-oci https://oracle.github.io/karpenter-provider-oci/charts
+helm repo update karpenter-provider-oci
+helm show values karpenter-provider-oci/karpenter --version <chart-version>
+```
+
+To list available chart versions:
+
+```shell
+helm search repo karpenter-provider-oci/karpenter --versions
 ```
 
 Only `settings.clusterCompartmentId`, `settings.vcnCompartmentId`, and `settings.apiserverEndpoint` must be provided by the user.
+
+Set `settings.ociVcnIpNative` to `true` only when the OKE cluster uses OCI VCN-native pod networking.
 
 The chart already provides a default OKE image compartment for `settings.preBakedImageCompartmentId`. You only need to set it if you want to override that default. Please refer to [Override the OKE image compartment used by `imageFilter`](advanced-use-cases.md#override-the-oke-image-compartment-used-by-imagefilter) for additional details.
 
@@ -37,16 +46,24 @@ For all the chart values, see [Helm Chart Reference](../reference/helm-chart.md)
      tag: "<image-tag>"
    ```
 
-3. Install:
+3. Add the KPO Helm repository:
 
    ```shell
-   helm install karpenter ./chart \
+   helm repo add karpenter-provider-oci https://oracle.github.io/karpenter-provider-oci/charts
+   helm repo update karpenter-provider-oci
+   ```
+
+4. Install:
+
+   ```shell
+   helm install karpenter karpenter-provider-oci/karpenter \
+     --version <chart-version> \
      --values <path-to-values.yaml> \
      --namespace <karpenter-namespace> \
      --create-namespace
    ```
 
-4. Verify:
+5. Verify:
 
    ```shell
    kubectl -n <karpenter-namespace> rollout status deploy/karpenter --timeout=120s
@@ -56,7 +73,10 @@ For all the chart values, see [Helm Chart Reference](../reference/helm-chart.md)
 ## Upgrade KPO Helm Chart
 
 ```shell
-helm upgrade karpenter ./chart \
+helm repo update karpenter-provider-oci
+
+helm upgrade karpenter karpenter-provider-oci/karpenter \
+  --version <chart-version> \
   --namespace <karpenter-namespace> \
   --values <path-to-values.yaml>
 ```

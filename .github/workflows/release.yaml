@@ -21,6 +21,42 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Derive release versions
+        id: versions
+        shell: bash
+        run: |
+          APP_VERSION="${GITHUB_REF_NAME}"
+
+          if [[ ! "${APP_VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Release tag must be stable SemVer prefixed with v, got ${APP_VERSION}"
+            exit 1
+          fi
+
+          CHART_VERSION="${APP_VERSION#v}"
+
+          echo "app-version=${APP_VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "chart-version=${CHART_VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "chart-package=dist/karpenter-${CHART_VERSION}.tgz" >> "${GITHUB_OUTPUT}"
+          echo "charts-url=https://oracle.github.io/karpenter-provider-oci/charts" >> "${GITHUB_OUTPUT}"
+
+      - name: Lint Helm chart
+        run: helm lint chart
+
+      - name: Package Helm chart
+        run: |
+          mkdir -p dist
+          helm package chart \
+            --version "${{ steps.versions.outputs.chart-version }}" \
+            --app-version "${{ steps.versions.outputs.app-version }}" \
+            --destination dist
+
+      - name: Checkout gh-pages
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: gh-pages
+          token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
         with:
@@ -44,3 +80,35 @@ jobs:
           push: true
           provenance: false
           tags: ghcr.io/oracle/karpenter-provider-oci:${{ github.ref_name }}
+
+      - name: Publish Helm chart repository
+        shell: bash
+        run: |
+          git config user.name "${GITHUB_ACTOR}"
+          git config user.email "${GITHUB_ACTOR}@users.noreply.github.com"
+
+          mkdir -p gh-pages/charts
+          cp "${{ steps.versions.outputs.chart-package }}" gh-pages/charts/
+          helm repo index gh-pages/charts \
+            --url "${{ steps.versions.outputs.charts-url }}" \
+            --merge gh-pages/charts/index.yaml
+
+          git -C gh-pages add charts
+          git -C gh-pages commit -m "Releasing Helm chart: ${{ github.ref_name }}"
+          git -C gh-pages push origin gh-pages
+
+      - name: Verify published Helm chart version
+        shell: bash
+        run: |
+          helm repo add karpenter-provider-oci "${{ steps.versions.outputs.charts-url }}"
+          helm repo update karpenter-provider-oci
+          PUBLISHED_CHART_VERSION="$(helm search repo karpenter-provider-oci/karpenter | grep '^karpenter-provider-oci/karpenter' | awk '{print $2}')"
+          EXPECTED_CHART_VERSION="${{ steps.versions.outputs.chart-version }}"
+
+          echo "PUBLISHED_CHART_VERSION=${PUBLISHED_CHART_VERSION}"
+          echo "EXPECTED_CHART_VERSION=${EXPECTED_CHART_VERSION}"
+
+          if [ "${PUBLISHED_CHART_VERSION}" != "${EXPECTED_CHART_VERSION}" ]; then
+            echo "published version and expected version are not matching"
+            exit 1
+          fi
