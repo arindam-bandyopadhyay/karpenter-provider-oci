@@ -14,6 +14,16 @@ Karpenter helps improve utilization and control cost in Kubernetes by:
 [![Release](https://img.shields.io/github/v/release/oracle/karpenter-provider-oci)](https://img.shields.io/github/v/release/oracle/karpenter-provider-oci)
 [![Coverage Status](https://coveralls.io/repos/github/oracle/karpenter-provider-oci/badge.svg?branch=main)](https://coveralls.io/github/oracle/karpenter-provider-oci?branch=main)
 
+## Compatibility
+
+Use a `karpenter-provider-oci` version that is compatible with your Kubernetes cluster version.
+For upstream Karpenter compatibility details, see the [Karpenter compatibility documentation](https://karpenter.sh/docs/upgrading/compatibility/).
+
+| Kubernetes Version | `karpenter-provider-oci` Version |
+| --- | --- |
+| `>= v1.31` and `<= v1.34` | `v1.0.0` |
+| `>= v1.35` | `v1.1.0` or higher |
+
 ## Installation
 
 See [Installation](docs/guide/installation.md).
@@ -61,6 +71,11 @@ See [Installation](docs/guide/installation.md).
 ## Examples
 
 See curated [examples](docs/guide/usage.md) for different use cases.
+
+## Additional Resources
+
+* [Oracle Cloud Infrastructure documentation for Karpenter Provider OCI](https://docs.oracle.com/en-us/iaas/Content/ContEng/Tasks/conteng-kpo.htm)
+* [Blog](https://blogs.oracle.com/cloud-infrastructure/smarter-kubernetes-autoscaling-with-karpenter)
 
 ## Help
 
