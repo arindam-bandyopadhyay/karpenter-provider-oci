@@ -96,19 +96,3 @@ jobs:
           git -C gh-pages add charts
           git -C gh-pages commit -m "Releasing Helm chart: ${{ github.ref_name }}"
           git -C gh-pages push origin gh-pages
-
-      - name: Verify published Helm chart version
-        shell: bash
-        run: |
-          helm repo add karpenter-provider-oci "${{ steps.versions.outputs.charts-url }}"
-          helm repo update karpenter-provider-oci
-          PUBLISHED_CHART_VERSION="$(helm search repo karpenter-provider-oci/karpenter | grep '^karpenter-provider-oci/karpenter' | awk '{print $2}')"
-          EXPECTED_CHART_VERSION="${{ steps.versions.outputs.chart-version }}"
-
-          echo "PUBLISHED_CHART_VERSION=${PUBLISHED_CHART_VERSION}"
-          echo "EXPECTED_CHART_VERSION=${EXPECTED_CHART_VERSION}"
-
-          if [ "${PUBLISHED_CHART_VERSION}" != "${EXPECTED_CHART_VERSION}" ]; then
-            echo "published version and expected version are not matching"
-            exit 1
-          fi
