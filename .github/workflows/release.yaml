@@ -19,7 +19,7 @@ jobs:
       IMAGE_REGISTRY: ghcr.io/oracle
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Derive release versions
         id: versions
@@ -51,29 +51,29 @@ jobs:
             --destination dist
 
       - name: Checkout gh-pages
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: gh-pages
           path: gh-pages
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
         with:
           platforms: linux/amd64,linux/arm64
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Login to Docker
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
