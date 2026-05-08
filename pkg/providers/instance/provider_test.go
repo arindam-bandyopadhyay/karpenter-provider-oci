@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/awslabs/operatorpkg/object"
 	ociv1beta1 "github.com/oracle/karpenter-provider-oci/pkg/apis/v1beta1"
 	"github.com/oracle/karpenter-provider-oci/pkg/cache"
 	"github.com/oracle/karpenter-provider-oci/pkg/fakes"
@@ -88,7 +89,18 @@ func minimalNodeClaim() *corev1.NodeClaim {
 				corev1.NodePoolLabelKey: "poolA",
 				ociv1beta1.NodeClass:    "classA",
 			},
+			OwnerReferences: []metav1.OwnerReference{nodePoolOwnerReference("poolA")},
 		},
+	}
+}
+
+func nodePoolOwnerReference(name string) metav1.OwnerReference {
+	nodePoolGVK := object.GVK(&corev1.NodePool{})
+	return metav1.OwnerReference{
+		APIVersion: nodePoolGVK.GroupVersion().String(),
+		Kind:       nodePoolGVK.Kind,
+		Name:       name,
+		UID:        "nodepool-uid",
 	}
 }
 
@@ -320,6 +332,7 @@ func TestProvider_GetNodePoolAndClassHashFromInstance(t *testing.T) {
 	inst := &ocicore.Instance{
 		FreeformTags: map[string]string{
 			NodePoolOciFreeFormTagKey:      "np",
+			NodePoolUIDOciFreeFormTagKey:   "nodepool-uid",
 			NodeClassHashOciFreeFormTagKey: "hash",
 		},
 	}
@@ -331,10 +344,16 @@ func TestProvider_GetNodePoolAndClassHashFromInstance(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, "hash", h)
 
+	nodePoolUID, ok := GetNodePoolUIDFromInstance(inst)
+	assert.True(t, ok)
+	assert.Equal(t, "nodepool-uid", nodePoolUID)
+
 	empty := &ocicore.Instance{}
 	_, ok = GetNodePoolNameFromInstance(empty)
 	assert.False(t, ok)
 	_, ok = GetNodeClassHashFromInstance(empty)
+	assert.False(t, ok)
+	_, ok = GetNodePoolUIDFromInstance(empty)
 	assert.False(t, ok)
 }
 
@@ -350,18 +369,38 @@ func TestProvider_BuildFreeFormTags(t *testing.T) {
 		},
 	}
 	nclaim := &corev1.NodeClaim{
-		ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{
-			corev1.NodePoolLabelKey: "pool1",
-			ociv1beta1.NodeClass:    "class1",
-		}},
+		ObjectMeta: metav1.ObjectMeta{
+			Labels: map[string]string{
+				corev1.NodePoolLabelKey: "pool1",
+				ociv1beta1.NodeClass:    "class1",
+			},
+			OwnerReferences: []metav1.OwnerReference{nodePoolOwnerReference("pool1")},
+		},
 	}
-	got := buildFreeFormTags(nc, nclaim)
+	got, err := buildFreeFormTags(nc, nclaim)
+	require.NoError(t, err)
 	_, ok := got["a"]
 	assert.True(t, ok)
 	assert.Equal(t, "1", got["a"])
 	assert.Equal(t, "pool1", got[NodePoolOciFreeFormTagKey])
+	assert.Equal(t, "nodepool-uid", got[NodePoolUIDOciFreeFormTagKey])
 	assert.Equal(t, "class1", got[NodeClassOciFreeFormTagKey])
 	assert.Equal(t, "hash123", got[NodeClassHashOciFreeFormTagKey])
+}
+
+func TestProvider_BuildFreeFormTagsRequiresNodePoolOwnerReferenceUID(t *testing.T) {
+	got, err := buildFreeFormTags(minimalNodeClass(), &corev1.NodeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "nc-missing-owner",
+			Labels: map[string]string{
+				corev1.NodePoolLabelKey: "pool1",
+				ociv1beta1.NodeClass:    "class1",
+			},
+		},
+	})
+	require.Error(t, err)
+	assert.Nil(t, got)
+	assert.Contains(t, err.Error(), "missing NodePool owner reference UID")
 }
 
 func TestProvider_DecorateNodeClaimByInstance(t *testing.T) {
@@ -733,7 +772,8 @@ func TestProvider_LaunchInstance_RequestConstruction(t *testing.T) {
 		it.Offerings = cloudprovider.Offerings{makeOfferingWithCapType(corev1.CapacityTypeSpot)}
 		nodeClass := baseNodeClass.DeepCopy()
 
-		_, err := p.LaunchInstance(context.TODO(), claim, nodeClass, it, imgRes, netRes, nil, pp)
+		_, err := p.LaunchInstance(context.TODO(), claim, nodeClass,
+			it, imgRes, netRes, nil, pp)
 		require.NoError(t, err)
 		require.NotNil(t, fc.LastLaunchReq.LaunchInstanceDetails.PreemptibleInstanceConfig, "expected preemptible config")
 	})
@@ -747,7 +787,8 @@ func TestProvider_LaunchInstance_RequestConstruction(t *testing.T) {
 		it.Offerings = cloudprovider.Offerings{makeOfferingWithCapType(corev1.CapacityTypeOnDemand)}
 		nodeClass := baseNodeClass.DeepCopy()
 
-		_, err := p.LaunchInstance(context.TODO(), claim, nodeClass, it, imgRes, netRes, nil, pp)
+		_, err := p.LaunchInstance(context.TODO(), claim, nodeClass,
+			it, imgRes, netRes, nil, pp)
 		require.NoError(t, err)
 		require.Nil(t, fc.LastLaunchReq.LaunchInstanceDetails.ShapeConfig, "did not expect shape config")
 	})
@@ -769,7 +810,8 @@ func TestProvider_LaunchInstance_RequestConstruction(t *testing.T) {
 		it.Offerings = cloudprovider.Offerings{makeOfferingWithCapType(corev1.CapacityTypeOnDemand)}
 		nodeClass := baseNodeClass.DeepCopy()
 
-		_, err := p.LaunchInstance(context.TODO(), claim, nodeClass, it, imgRes, netRes, nil, pp)
+		_, err := p.LaunchInstance(context.TODO(), claim, nodeClass,
+			it, imgRes, netRes, nil, pp)
 		require.NoError(t, err)
 		require.NotNil(t, fc.LastLaunchReq.LaunchInstanceDetails.ShapeConfig, "expected shape config")
 		require.Equal(t, *fc.LastLaunchReq.LaunchInstanceDetails.ShapeConfig.Ocpus, ocpu, "ocpu should match")
@@ -790,7 +832,8 @@ func TestProvider_LaunchInstance_RequestConstruction(t *testing.T) {
 		it.Offerings = cloudprovider.Offerings{makeOfferingWithCapType(corev1.CapacityTypeSpot)}
 		nodeClass := baseNodeClass.DeepCopy()
 
-		_, err := p.LaunchInstance(context.TODO(), claim, nodeClass, it, imgRes, netRes, nil, pp)
+		_, err := p.LaunchInstance(context.TODO(), claim, nodeClass,
+			it, imgRes, netRes, nil, pp)
 		require.NoError(t, err)
 		require.Nil(t, fc.LastLaunchReq.LaunchInstanceDetails.PreemptibleInstanceConfig,
 			"burstable should not be preemptible")
@@ -813,7 +856,8 @@ func TestProvider_LaunchInstance_RequestConstruction(t *testing.T) {
 		// provide kms key
 		k := &kms.KmsKeyResolveResult{Ocid: "ocid1.key.oc1.iad.xxxxx"}
 
-		_, err := p.LaunchInstance(context.TODO(), claim, nodeClass, it, imgRes, netRes, k, pp)
+		_, err := p.LaunchInstance(context.TODO(), claim, nodeClass,
+			it, imgRes, netRes, k, pp)
 		require.NoError(t, err)
 
 		// Assert IMDS v1 disabled
@@ -870,7 +914,8 @@ func TestProvider_LaunchInstance_RequestConstruction(t *testing.T) {
 			},
 		}
 
-		_, err := p.LaunchInstance(context.TODO(), claim, nodeClass, it, imgRes, nr, nil, pp)
+		_, err := p.LaunchInstance(context.TODO(), claim, nodeClass,
+			it, imgRes, nr, nil, pp)
 		require.NoError(t, err)
 
 		// Validate VNIC details precedence
@@ -890,6 +935,7 @@ func TestProvider_LaunchInstance_RequestConstruction(t *testing.T) {
 
 		// Validate freeform/defined tags
 		require.Equal(t, "poolZ", fc.LastLaunchReq.LaunchInstanceDetails.FreeformTags[NodePoolOciFreeFormTagKey])
+		require.Equal(t, "nodepool-uid", fc.LastLaunchReq.LaunchInstanceDetails.FreeformTags[NodePoolUIDOciFreeFormTagKey])
 		require.Equal(t, "classZ", fc.LastLaunchReq.LaunchInstanceDetails.FreeformTags[NodeClassOciFreeFormTagKey])
 		require.Equal(t, "h123", fc.LastLaunchReq.LaunchInstanceDetails.FreeformTags[NodeClassHashOciFreeFormTagKey])
 		require.Equal(t, "v1", fc.LastLaunchReq.LaunchInstanceDetails.DefinedTags["ns"]["k1"])
@@ -1022,8 +1068,9 @@ func TestProvider_LaunchInstance_FailurePaths(t *testing.T) {
 
 	t.Run("launch error propagates", func(t *testing.T) {
 		fc.LaunchErr = errors.New("launch failed")
-		_, err := p.LaunchInstance(context.TODO(), baseClaim, baseNodeClass, &instancetype.OciInstanceType{
-			Shape: "VM.Standard.E4.Flex"}, imgRes, netRes, nil, pp)
+		_, err := p.LaunchInstance(context.TODO(), baseClaim, baseNodeClass,
+			&instancetype.OciInstanceType{
+				Shape: "VM.Standard.E4.Flex"}, imgRes, netRes, nil, pp)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "launch failed")
 		fc.LaunchErr = nil // reset
@@ -1031,8 +1078,9 @@ func TestProvider_LaunchInstance_FailurePaths(t *testing.T) {
 
 	t.Run("retryable error", func(t *testing.T) {
 		fc.LaunchErr = errors.New("TooManyRequests: rate limited")
-		_, err := p.LaunchInstance(context.TODO(), baseClaim, baseNodeClass, &instancetype.OciInstanceType{
-			Shape: "VM.Standard.E4.Flex"}, imgRes, netRes, nil, pp)
+		_, err := p.LaunchInstance(context.TODO(), baseClaim, baseNodeClass,
+			&instancetype.OciInstanceType{
+				Shape: "VM.Standard.E4.Flex"}, imgRes, netRes, nil, pp)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "rate limited")
 		fc.LaunchErr = nil
@@ -1224,8 +1272,7 @@ func TestProvider_LaunchInstance_WorkRequestSuccess(t *testing.T) {
 	}
 
 	placementProposal := minimalPlacement()
-	inst, err := p.LaunchInstance(context.TODO(), minimalNodeClaim(), minimalNodeClass(),
-		it, minimalImageResolve(),
+	inst, err := p.LaunchInstance(context.TODO(), minimalNodeClaim(), minimalNodeClass(), it, minimalImageResolve(),
 		minimalNetworkResolve(), nil, placementProposal)
 
 	require.NoError(t, err)
@@ -1368,8 +1415,8 @@ func TestProvider_LaunchInstance_Timeout(t *testing.T) {
 	}
 
 	t.Run("launch a bm shape timeout should return an instance without error", func(t *testing.T) {
-		inst, launchErr := p.LaunchInstance(context.TODO(), newNodeClaim(displayName1), minimalNodeClass(),
-			newInstanceType("BM.Standard1.1"), minimalImageResolve(),
+		inst, launchErr := p.LaunchInstance(context.TODO(), newNodeClaim(displayName1),
+			minimalNodeClass(), newInstanceType("BM.Standard1.1"), minimalImageResolve(),
 			minimalNetworkResolve(), nil, minimalPlacement())
 
 		require.NoError(t, launchErr)
@@ -1380,8 +1427,7 @@ func TestProvider_LaunchInstance_Timeout(t *testing.T) {
 	t.Run("launch a vm shape timeout, then retrieve volumes success with attached volume,"+
 		" should return an instance without error", func(t *testing.T) {
 		inst, launchErr := p.LaunchInstance(context.TODO(), newNodeClaim(displayName1), minimalNodeClass(),
-			newInstanceType("VM.Standard1.1"), minimalImageResolve(),
-			minimalNetworkResolve(), nil, minimalPlacement())
+			newInstanceType("VM.Standard1.1"), minimalImageResolve(), minimalNetworkResolve(), nil, minimalPlacement())
 
 		require.NoError(t, launchErr)
 		assert.NotNil(t, inst)
@@ -1391,8 +1437,7 @@ func TestProvider_LaunchInstance_Timeout(t *testing.T) {
 	t.Run("launch a vm shape timeout, then retrieve volumes failed, "+
 		"should return an instance without error", func(t *testing.T) {
 		inst, launchErr := p.LaunchInstance(context.TODO(), newNodeClaim(displayName4), minimalNodeClass(),
-			newInstanceType("VM.Standard1.1"), minimalImageResolve(),
-			minimalNetworkResolve(), nil, minimalPlacement())
+			newInstanceType("VM.Standard1.1"), minimalImageResolve(), minimalNetworkResolve(), nil, minimalPlacement())
 
 		require.NoError(t, launchErr)
 		assert.NotNil(t, inst)
@@ -1402,8 +1447,7 @@ func TestProvider_LaunchInstance_Timeout(t *testing.T) {
 	t.Run("launch a vm shape timeout, then retrieve volumes success but no volume attached, "+
 		"then try to terminate instance but failed, should return an instance without error", func(t *testing.T) {
 		inst, launchErr := p.LaunchInstance(context.TODO(), newNodeClaim(displayName3), minimalNodeClass(),
-			newInstanceType("VM.Standard1.1"), minimalImageResolve(),
-			minimalNetworkResolve(), nil, minimalPlacement())
+			newInstanceType("VM.Standard1.1"), minimalImageResolve(), minimalNetworkResolve(), nil, minimalPlacement())
 
 		require.NoError(t, launchErr)
 		assert.NotNil(t, inst)
@@ -1413,8 +1457,7 @@ func TestProvider_LaunchInstance_Timeout(t *testing.T) {
 	t.Run("launch a vm shape timeout, then retrieve volumes success but no volume attached, "+
 		"then try to terminate instance and success, should return no capacity error", func(t *testing.T) {
 		inst, launchErr := p.LaunchInstance(context.TODO(), newNodeClaim(displayName2), minimalNodeClass(),
-			newInstanceType("VM.Standard1.1"), minimalImageResolve(),
-			minimalNetworkResolve(), nil, minimalPlacement())
+			newInstanceType("VM.Standard1.1"), minimalImageResolve(), minimalNetworkResolve(), nil, minimalPlacement())
 
 		require.NotNil(t, launchErr)
 		assert.Nil(t, inst)

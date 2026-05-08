@@ -484,6 +484,10 @@ func (c *CloudProvider) List(ctx context.Context) ([]*corev1.NodeClaim, error) {
 		return item.Name
 	})...)
 
+	nodePoolUIDByName := lo.SliceToMap(nodePoolList.Items, func(item corev1.NodePool) (string, string) {
+		return item.Name, string(item.UID)
+	})
+
 	for _, compartmentId := range nodeCompartments {
 		ins, err = c.instanceProvider.ListInstances(ctx, compartmentId)
 		if err != nil {
@@ -491,6 +495,11 @@ func (c *CloudProvider) List(ctx context.Context) ([]*corev1.NodeClaim, error) {
 		}
 
 		for _, i := range ins {
+			nodePoolName, ok := instance.GetNodePoolNameFromInstance(i)
+			if !ok || !isInstanceOwnedByNodePool(i, nodePoolUIDByName[nodePoolName]) {
+				continue
+			}
+
 			nodeClaim, inerr := c.createNodeClaimFromInstance(ctx, i)
 			if inerr != nil {
 				return nil, inerr
@@ -505,6 +514,15 @@ func (c *CloudProvider) List(ctx context.Context) ([]*corev1.NodeClaim, error) {
 	}
 
 	return nodeClaims, nil
+}
+
+func isInstanceOwnedByNodePool(i *ocicore.Instance, expectedNodePoolUID string) bool {
+	nodePoolUID, ok := instance.GetNodePoolUIDFromInstance(i)
+	if !ok {
+		return true
+	}
+
+	return nodePoolUID != "" && expectedNodePoolUID == nodePoolUID
 }
 
 func (c *CloudProvider) getOciInstanceTypes(ctx context.Context,

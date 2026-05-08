@@ -33,7 +33,7 @@ If you need to force cleanup (for example, after partial failures), inspect fina
 
 ### OCI-side discovery
 
-Instances launched by Karpenter will have the `KarpenterNodePool` freeform tag. You can use:
+Instances launched by Karpenter will have `KarpenterNodePool` and `KarpenterNodePoolUID` freeform tags. `KarpenterNodePoolUID` identifies the Kubernetes NodePool that launched the instance. You can use:
 - **OCI Resource Explorer** to find instances by tags: [Querying resources](https://docs.oracle.com/en-us/iaas/Content/Search/Tasks/queryingresources.htm)
 - **OCI CLI Search** (optional) to list resources by structured search:
 
@@ -41,5 +41,7 @@ Instances launched by Karpenter will have the `KarpenterNodePool` freeform tag. 
 oci search resource structured-search --query-text \
   "query instance resources where (freeformTags.key = 'KarpenterNodePool')"
 ```
+
+Instances created by older KPO versions might not have `KarpenterNodePoolUID`. KPO falls back to the legacy `KarpenterNodePool` name match for those instances.
 
 When deleting a cluster, ensure that any Karpenter-managed instances (and any dependent resources they created) are also deleted.

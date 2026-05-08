@@ -39,6 +39,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	clientfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -50,6 +51,7 @@ import (
 
 const (
 	nodeClassClusterCompartmentID = "ocid1.compartment.oc1..cluster123"
+	sharedCompartmentID           = "ocid1.compartment.oc1..shared"
 	testImageID                   = "ocid1.image.oc1..test"
 )
 
@@ -120,7 +122,12 @@ var _ = Describe("CloudProvider Integration Tests", func() {
 		nodeClassPtr := &ociTestNodeClass
 		ExpectApplied(ctx, k8sClient, nodeClassPtr)
 		ExpectObjectReconciled(ctx, k8sClient, ociNodeClassController, nodeClassPtr)
+		nodePool := testNodePool("pool-a", nodeClassPtr.Name)
+		ExpectApplied(ctx, k8sClient, nodePool)
 		nodeClaimPtr := &v1.NodeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{v1.NodePoolLabelKey: nodePool.Name},
+			},
 			Spec: v1.NodeClaimSpec{
 				NodeClassRef: &v1.NodeClassReference{
 					Kind:  nodeClassPtr.Kind,
@@ -379,6 +386,25 @@ var _ = Describe("CloudProvider Unit Tests", func() {
 			Expect(cp.Delete(context.Background(), nodeClaim)).To(Succeed())
 			Expect(released).To(ContainElement("ocid1.capacityreservation.oc1..abc"))
 		})
+
+		It("should trust nodeclaim provider ID when deleting tagged instances", func() {
+			deleteCalled := false
+			cp.instanceProvider = &FakeInstanceProvider{
+				GetInstanceFn: func(context.Context, string) (*instance.InstanceInfo, error) {
+					i := testInstanceWithShape("shape-a", "pool-a")
+					i.Id = lo.ToPtr(nodeClaim.Status.ProviderID)
+					i.FreeformTags[instance.NodePoolUIDOciFreeFormTagKey] = "other-nodepool-uid"
+					return &instance.InstanceInfo{Instance: i}, nil
+				},
+				DeleteInstanceFn: func(context.Context, string) error {
+					deleteCalled = true
+					return nil
+				},
+			}
+
+			Expect(cp.Delete(context.Background(), nodeClaim)).To(Succeed())
+			Expect(deleteCalled).To(BeTrue())
+		})
 	})
 
 	Context("List", func() {
@@ -412,11 +438,89 @@ var _ = Describe("CloudProvider Unit Tests", func() {
 			Expect(nodeClaims).To(HaveLen(1))
 			Expect(nodeClaims[0].Labels[v1.NodePoolLabelKey]).To(Equal(nodePool.Name))
 		})
+
+		It("should include instances when nodepool name and UID match", func() {
+			nodeClass := testReadyNodeClass(uniqueName("used"))
+			compartment := sharedCompartmentID
+			nodeClass.Spec.NodeCompartmentId = &compartment
+			nodePool := testNodePoolWithUID(uniqueName("nodepool"), nodeClass.Name)
+			localInstance := testInstanceWithShape("shape-a", nodePool.Name)
+			localInstance.FreeformTags[instance.NodePoolUIDOciFreeFormTagKey] = string(nodePool.UID)
+
+			cp := newUnitTestCloudProvider(unitTestCloudProviderOptions{
+				kubeClient:    newFakeKubeClient(nodeClass, nodePool),
+				instanceTypes: []*instancetype.OciInstanceType{testInstanceType("shape-a", 10)},
+				instanceProvider: &FakeInstanceProvider{
+					ListInstancesFn: func(_ context.Context, _ string) ([]*ocicore.Instance, error) {
+						return []*ocicore.Instance{localInstance}, nil
+					},
+				},
+			})
+
+			nodeClaims, err := cp.List(context.Background())
+			Expect(err).ToNot(HaveOccurred())
+			Expect(nodeClaims).To(HaveLen(1))
+			Expect(nodeClaims[0].Labels[v1.NodePoolLabelKey]).To(Equal(nodePool.Name))
+		})
+
+		It("should exclude instances owned by another nodepool UID even when nodepool names match", func() {
+			nodeClass := testReadyNodeClass(uniqueName("used"))
+			compartment := sharedCompartmentID
+			nodeClass.Spec.NodeCompartmentId = &compartment
+			nodePool := testNodePoolWithUID(uniqueName("nodepool"), nodeClass.Name)
+			foreignInstance := testInstanceWithShape("shape-a", nodePool.Name)
+			foreignInstance.FreeformTags[instance.NodePoolUIDOciFreeFormTagKey] = "other-nodepool-uid"
+
+			cp := newUnitTestCloudProvider(unitTestCloudProviderOptions{
+				kubeClient:    newFakeKubeClient(nodeClass, nodePool),
+				instanceTypes: []*instancetype.OciInstanceType{testInstanceType("shape-a", 10)},
+				instanceProvider: &FakeInstanceProvider{
+					ListInstancesFn: func(_ context.Context, _ string) ([]*ocicore.Instance, error) {
+						return []*ocicore.Instance{foreignInstance}, nil
+					},
+				},
+			})
+
+			nodeClaims, err := cp.List(context.Background())
+			Expect(err).ToNot(HaveOccurred())
+			Expect(nodeClaims).To(BeEmpty())
+		})
+
+		It("should include legacy untagged instances when nodepool name matches", func() {
+			nodeClass := testReadyNodeClass(uniqueName("used"))
+			compartment := sharedCompartmentID
+			nodeClass.Spec.NodeCompartmentId = &compartment
+			nodePool := testNodePool("pool-a", nodeClass.Name)
+
+			ownedLegacy := testInstanceWithShape("shape-a", nodePool.Name)
+			ownedLegacy.Id = lo.ToPtr("ocid1.instance.oc1..legacy-owned")
+			delete(ownedLegacy.FreeformTags, instance.NodePoolUIDOciFreeFormTagKey)
+
+			unownedLegacy := testInstanceWithShape("shape-a", nodePool.Name)
+			unownedLegacy.Id = lo.ToPtr("ocid1.instance.oc1..legacy-unowned")
+			delete(unownedLegacy.FreeformTags, instance.NodePoolUIDOciFreeFormTagKey)
+
+			cp := newUnitTestCloudProvider(unitTestCloudProviderOptions{
+				kubeClient:    newFakeKubeClient(nodeClass, nodePool),
+				instanceTypes: []*instancetype.OciInstanceType{testInstanceType("shape-a", 10)},
+				instanceProvider: &FakeInstanceProvider{
+					ListInstancesFn: func(_ context.Context, _ string) ([]*ocicore.Instance, error) {
+						return []*ocicore.Instance{ownedLegacy, unownedLegacy}, nil
+					},
+				},
+			})
+
+			nodeClaims, err := cp.List(context.Background())
+			Expect(err).ToNot(HaveOccurred())
+			Expect(nodeClaims).To(HaveLen(2))
+		})
+
 	})
 
 	Context("Create", func() {
 		var (
 			nodeClass   *v1beta1.OCINodeClass
+			nodePool    *v1.NodePool
 			kubeClient  client.Client
 			nodeClaim   *v1.NodeClaim
 			instanceA   *instancetype.OciInstanceType
@@ -426,7 +530,8 @@ var _ = Describe("CloudProvider Unit Tests", func() {
 
 		BeforeEach(func() {
 			nodeClass = testReadyNodeClass(uniqueName("create"))
-			kubeClient = newFakeKubeClient(nodeClass)
+			nodePool = testNodePoolWithUID("pool-a", nodeClass.Name)
+			kubeClient = newFakeKubeClient(nodeClass, nodePool)
 			nodeClaim = testNodeClaim(nodeClass.Name)
 			instanceA = testInstanceType("shape-a", 10)
 			instanceB = testInstanceType("shape-b", 20)
@@ -773,6 +878,12 @@ func testNodePool(name, nodeClassName string) *v1.NodePool {
 			},
 		},
 	}
+}
+
+func testNodePoolWithUID(name, nodeClassName string) *v1.NodePool {
+	nodePool := testNodePool(name, nodeClassName)
+	nodePool.UID = types.UID(name + "-uid")
+	return nodePool
 }
 
 func testInstanceType(shape string, price float64) *instancetype.OciInstanceType {

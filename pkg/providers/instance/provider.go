@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/awslabs/operatorpkg/object"
 	"github.com/oracle/karpenter-provider-oci/pkg/apis/v1beta1"
 	"github.com/oracle/karpenter-provider-oci/pkg/cache"
 	"github.com/oracle/karpenter-provider-oci/pkg/oci"
@@ -36,6 +37,7 @@ import (
 
 const (
 	NodePoolOciFreeFormTagKey      = "KarpenterNodePool"
+	NodePoolUIDOciFreeFormTagKey   = "KarpenterNodePoolUID"
 	NodeClassOciFreeFormTagKey     = "KarpenterNodeClass"
 	NodeClassHashOciFreeFormTagKey = "Karpenter_NodeClass_Hash"
 )
@@ -165,6 +167,11 @@ func (p *DefaultProvider) LaunchInstance(ctx context.Context,
 
 	launchOptions := BuildLaunchOptions(nodeClass.Spec.LaunchOptions)
 
+	freeFormTags, err := buildFreeFormTags(nodeClass, nodeClaim)
+	if err != nil {
+		return nil, err
+	}
+
 	// construct launch instance request.
 	launchRequest := ocicore.LaunchInstanceRequest{
 		LaunchInstanceDetails: ocicore.LaunchInstanceDetails{
@@ -178,7 +185,7 @@ func (p *DefaultProvider) LaunchInstance(ctx context.Context,
 				nodeClass.Spec.NetworkConfig.PrimaryVnicConfig),
 			DefinedTags:               buildDefinedTags(nodeClass.Spec.DefinedTags),
 			DisplayName:               &nodeClaim.Name,
-			FreeformTags:              buildFreeFormTags(nodeClass, nodeClaim),
+			FreeformTags:              freeFormTags,
 			Metadata:                  metadata,
 			PreemptibleInstanceConfig: preemptibleInstanceConfig, // preemptible support
 			Shape:                     &instanceType.Shape,
@@ -618,6 +625,17 @@ func GetNodePoolNameFromInstance(instance *ocicore.Instance) (string, bool) {
 	return "", false
 }
 
+func GetNodePoolUIDFromInstance(instance *ocicore.Instance) (string, bool) {
+	if instance.FreeformTags != nil {
+		v, ok := instance.FreeformTags[NodePoolUIDOciFreeFormTagKey]
+		if ok {
+			return v, true
+		}
+	}
+
+	return "", false
+}
+
 func GetNodeClassHashFromInstance(instance *ocicore.Instance) (string, bool) {
 	if instance.FreeformTags != nil {
 		v, ok := instance.FreeformTags[NodeClassHashOciFreeFormTagKey]
@@ -629,7 +647,7 @@ func GetNodeClassHashFromInstance(instance *ocicore.Instance) (string, bool) {
 	return "", false
 }
 
-func buildFreeFormTags(nodeClass *v1beta1.OCINodeClass, nodeClaim *corev1.NodeClaim) map[string]string {
+func buildFreeFormTags(nodeClass *v1beta1.OCINodeClass, nodeClaim *corev1.NodeClaim) (map[string]string, error) {
 	freeFormTags := make(map[string]string)
 	if nodeClass.Spec.FreeformTags != nil {
 		freeFormTags = lo.Assign(freeFormTags, nodeClass.Spec.FreeformTags)
@@ -652,7 +670,29 @@ func buildFreeFormTags(nodeClass *v1beta1.OCINodeClass, nodeClaim *corev1.NodeCl
 		freeFormTags[NodeClassHashOciFreeFormTagKey] = val
 	}
 
-	return freeFormTags
+	nodePoolUID, ok := nodePoolUIDFromNodeClaimOwnerReference(nodeClaim)
+	if !ok {
+		return nil, fmt.Errorf("nodeclaim %s is missing NodePool owner reference UID", nodeClaim.Name)
+	}
+	if nodePoolUID != "" {
+		freeFormTags[NodePoolUIDOciFreeFormTagKey] = nodePoolUID
+	}
+
+	return freeFormTags, nil
+}
+
+func nodePoolUIDFromNodeClaimOwnerReference(nodeClaim *corev1.NodeClaim) (string, bool) {
+	nodePoolGVK := object.GVK(&corev1.NodePool{})
+	owner, ok := lo.Find(nodeClaim.GetOwnerReferences(), func(owner metav1.OwnerReference) bool {
+		if owner.APIVersion == nodePoolGVK.GroupVersion().String() &&
+			owner.Kind == nodePoolGVK.Kind &&
+			owner.UID != "" {
+			return true
+		}
+
+		return false
+	})
+	return string(owner.UID), ok
 }
 
 func DecorateNodeClaimByInstance(nodeClaim *corev1.NodeClaim, i *ocicore.Instance) {

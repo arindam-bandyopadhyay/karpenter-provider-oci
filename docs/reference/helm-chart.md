@@ -83,6 +83,11 @@ A Helm chart for Karpenter provider OCI
 | settings.ipFamilies | list | `["IPv4"]` | by default only IPv4, add IPv6 in needed |
 | settings.ociVcnIpNative | bool | `false` | set this to true for a cluster run with OciVcnIpNative |
 | settings.preBakedImageCompartmentId | string | `"ocid1.compartment.oc1..aaaaaaaab4u67dhgtj5gpdpp3z42xqqsdnufxkatoild46u3hb67vzojfmzq"` | Compartment OCID under which OKE pre-baked images are published |
+| settings.rateLimiter.burstRead | int | `0` | Read burst for the OCI client-side rate limiter. 0 uses the built-in default. |
+| settings.rateLimiter.burstWrite | int | `0` | Write burst for the OCI client-side rate limiter. 0 uses the built-in default. |
+| settings.rateLimiter.disable | bool | `true` | Disable the OCI client-side rate limiter. |
+| settings.rateLimiter.qpsRead | int | `0` | Read QPS for the OCI client-side rate limiter. 0 uses the built-in default. |
+| settings.rateLimiter.qpsWrite | int | `0` | Write QPS for the OCI client-side rate limiter. 0 uses the built-in default. |
 | settings.vcnCompartmentId | string | `""` | [required] Cluster's VCN compartment OCID. |
 | strategy | object | `{"rollingUpdate":{"maxUnavailable":1}}` | Strategy for updating the pod. |
 | terminationGracePeriodSeconds | string | `nil` | Override the default termination grace period for the pod. |

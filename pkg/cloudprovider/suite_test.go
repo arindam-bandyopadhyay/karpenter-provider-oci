@@ -124,8 +124,8 @@ func getFirstFoundEnvTestBinaryDir() string {
 type FakeInstanceProvider struct {
 	TestInstance     *instance.InstanceInfo
 	LaunchInstanceFn func(context.Context, *corev1.NodeClaim, *ocioraclecouldcomv1beta1.OCINodeClass,
-		*instancetype.OciInstanceType, *image.ImageResolveResult, *network.NetworkResolveResult,
-		*kms.KmsKeyResolveResult, *placement.Proposal) (*instance.InstanceInfo, error)
+		*instancetype.OciInstanceType, *image.ImageResolveResult, *network.NetworkResolveResult, *kms.KmsKeyResolveResult,
+		*placement.Proposal) (*instance.InstanceInfo, error)
 	DeleteInstanceFn                    func(context.Context, string) error
 	GetInstanceFn                       func(context.Context, string) (*instance.InstanceInfo, error)
 	GetInstanceCachedFn                 func(context.Context, string) (*instance.InstanceInfo, error)
