@@ -170,9 +170,10 @@ func (c *rateLimitedComputeClient) GetComputeCluster(ctx context.Context,
 
 func (c *rateLimitedComputeClient) ListComputeClusters(ctx context.Context,
 	req ocicore.ListComputeClustersRequest) (ocicore.ListComputeClustersResponse, error) {
-	return callWithReadLimit(ctx, c.limiter, "ListComputeClusters", req, func() (ocicore.ListComputeClustersResponse, error) {
-		return c.inner.ListComputeClusters(ctx, req)
-	})
+	return callWithReadLimit(ctx, c.limiter, "ListComputeClusters", req,
+		func() (ocicore.ListComputeClustersResponse, error) {
+			return c.inner.ListComputeClusters(ctx, req)
+		})
 }
 
 func (c *rateLimitedComputeClient) GetImage(ctx context.Context,
