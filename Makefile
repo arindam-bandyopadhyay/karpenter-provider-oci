@@ -52,7 +52,7 @@ help: ## Display this help.
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
 ##@ Development
-verify: toolchain tidy download fmt sync-karpenter-crds gogen docs-gen-api docs-gen-helm addlicense-apply addlicense-check test ## Verify code. Includes dependencies, linting, formatting, etc
+verify: update-base-image-digests update-github-action-shas update-toolchain-versions toolchain tidy download fmt sync-karpenter-crds gogen docs-gen-api docs-gen-helm addlicense-apply addlicense-check test ## Verify code. Includes dependencies, linting, formatting, etc
 
 	$(foreach dir,$(MOD_DIRS),cd $(dir) && golangci-lint run $(newline))
 	@git diff --quiet ||\
@@ -64,6 +64,45 @@ verify: toolchain tidy download fmt sync-karpenter-crds gogen docs-gen-api docs-
 
 toolchain: ## Install developer toolchain
 	./hack/toolchain.sh
+
+.PHONY: update-base-image-digests
+update-base-image-digests: ## Refresh Dockerfile base image digest pins.
+	@set -euo pipefail; \
+	update_image_arg() { \
+		arg_name="$$1"; \
+		current="$$(awk -F= -v arg="ARG $$arg_name" '$$1 == arg {print $$2; exit}' Dockerfile)"; \
+		if [ -z "$$current" ]; then \
+			echo "Error: ARG $$arg_name not found in Dockerfile" >&2; \
+			exit 1; \
+		fi; \
+		image="$${current%@sha256:*}"; \
+		echo "Resolving remote digest for $$arg_name ($$image)"; \
+		inspect="$$( $(CONTAINER_TOOL) buildx imagetools inspect "$$image" 2>&1 )" || { \
+			echo "$$inspect" >&2; \
+			echo "Error: failed to resolve remote digest for $$image; refusing to use local cache" >&2; \
+			exit 1; \
+		}; \
+		digest="$$(awk '/^Digest:/ {print $$2; exit}' <<< "$$inspect")"; \
+		if [ -z "$$digest" ]; then \
+			echo "$$inspect" >&2; \
+			echo "Error: failed to find remote digest for $$image; refusing to use local cache" >&2; \
+			exit 1; \
+		fi; \
+		tmp="$$(mktemp)"; \
+		awk -v arg="ARG $$arg_name=" -v new="ARG $$arg_name=$$image@$$digest" \
+			'index($$0, arg) == 1 { print new; next } { print }' Dockerfile > "$$tmp"; \
+		mv "$$tmp" Dockerfile; \
+	}; \
+	update_image_arg BUILDER_IMAGE; \
+	update_image_arg BASE_IMAGE
+
+.PHONY: update-github-action-shas
+update-github-action-shas: ## Upgrade GitHub Actions to latest stable tags and refresh SHA pins.
+	./hack/update-github-action-shas.sh .github/workflows/build.yaml .github/workflows/release.yaml
+
+.PHONY: update-toolchain-versions
+update-toolchain-versions: ## Upgrade pinned toolchain versions.
+	./hack/toolchain.sh update-versions
 
 .PHONY: addlicense-check
 addlicense-check: ## Check files for missing UPL header (excludes vendor/bin)
@@ -171,12 +210,12 @@ ENVTEST ?= $(LOCALBIN)/setup-envtest
 GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
 
 ## Tool Versions
-CONTROLLER_TOOLS_VERSION ?= v0.20.0
+CONTROLLER_TOOLS_VERSION ?= v0.21.0
 #ENVTEST_VERSION is the version of controller-runtime release branch to fetch the envtest setup script (i.e. release-0.20)
 ENVTEST_VERSION ?= $(shell go list -m -f "{{ .Version }}" sigs.k8s.io/controller-runtime | awk -F'[v.]' '{printf "release-%d.%d", $$2, $$3}')
 #ENVTEST_K8S_VERSION is the version of Kubernetes to use for setting up ENVTEST binaries (i.e. 1.31)
 ENVTEST_K8S_VERSION ?= $(shell go list -m -f "{{ .Version }}" k8s.io/api | awk -F'[v.]' '{printf "1.%d", $$3}')
-GOLANGCI_LINT_VERSION ?= v1.63.4
+GOLANGCI_LINT_VERSION ?= v1.64.8
 
 .PHONY: controller-gen
 controller-gen: $(CONTROLLER_GEN) ## Download controller-gen locally if necessary.

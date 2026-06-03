@@ -21,7 +21,7 @@ For upstream Karpenter compatibility details, see the [Karpenter compatibility d
 
 | Kubernetes Version | `karpenter-provider-oci` Version |
 | --- | --- |
-| `>= v1.31` and `<= v1.34` | `v1.0.0` |
+| `>= v1.31` and `<= v1.34` | `v1.0.0` or higher |
 | `>= v1.35` | `v1.1.0` or higher |
 
 ## Installation

@@ -34,6 +34,14 @@ const (
 	ValueTrue  = "true"
 )
 
+var reservedMetadataKeys = map[string]struct{}{
+	"ssh_authorized_keys": {},
+	"apiserver_host":      {},
+	"cluster_ca_cert":     {},
+	"kubedns_svc_ip":      {},
+	"kubelet-extra-args":  {},
+}
+
 type Provider interface {
 	BuildInstanceMetadata(ctx context.Context, claim *corev1.NodeClaim,
 		nodeClass *v1beta1.OCINodeClass,
@@ -109,6 +117,9 @@ func (p *DefaultProvider) BuildInstanceMetadata(ctx context.Context, claim *core
 
 	// pass all customer provided metadata to imds metadata
 	for k, v := range nodeClass.Spec.Metadata {
+		if isReservedMetadataKey(k) {
+			continue
+		}
 		metadata[k] = v
 	}
 
@@ -154,6 +165,11 @@ func (p *DefaultProvider) BuildInstanceMetadata(ctx context.Context, claim *core
 
 	// TODO: support [oke-is-onsr] and other attributes
 	return metadata, nil
+}
+
+func isReservedMetadataKey(key string) bool {
+	_, ok := reservedMetadataKeys[key]
+	return ok
 }
 
 func (p *DefaultProvider) buildUserDataForPreBakedImage(claim *corev1.NodeClaim,
@@ -242,11 +258,20 @@ func appendKubeletExtraArgs(base *strings.Builder, claim *corev1.NodeClaim,
 	if extraArgsValue.Len() > 0 {
 		base.WriteString(" \\\n")
 		base.WriteString(" --kubelet-extra-args \"")
-		base.WriteString(extraArgsValue.String())
+		base.WriteString(escapeDoubleQuotedShellValue(extraArgsValue.String()))
 		base.WriteString("\"")
 	}
 
 	return nil
+}
+
+func escapeDoubleQuotedShellValue(value string) string {
+	return strings.NewReplacer(
+		`\`, `\\`,
+		`"`, `\"`,
+		`$`, `\$`,
+		"`", "\\`",
+	).Replace(value)
 }
 
 func getKubeletExtraArgs(class *v1beta1.OCINodeClass, claim *corev1.NodeClaim,

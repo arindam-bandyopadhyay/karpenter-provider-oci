@@ -83,8 +83,8 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 		return item.Status.ProviderID != ""
 	})
 
-	var errs []error
-	var fastRequeue bool
+	errs := make([]error, len(cloudProviderNodeClaims))
+	fastRequeues := make([]bool, len(cloudProviderNodeClaims))
 	workqueue.ParallelizeUntil(ctx, 5, len(cloudProviderNodeClaims), func(i int) {
 		cpNodeClaim := cloudProviderNodeClaims[i]
 
@@ -115,10 +115,10 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 		if reclaim {
 			finished, reclaimErr := c.reclaim(ctx, cpNodeClaim)
 			if reclaimErr != nil {
-				errs = append(errs, reclaimErr)
+				errs[i] = reclaimErr
 			}
 
-			fastRequeue = fastRequeue || !finished
+			fastRequeues[i] = !finished
 		}
 	})
 
@@ -126,7 +126,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 		return reconciler.Result{}, err
 	} else {
 		requeueAfter := slowRequeueAfter
-		if fastRequeue {
+		if lo.Contains(fastRequeues, true) {
 			requeueAfter = fastRequeueAfter
 		}
 

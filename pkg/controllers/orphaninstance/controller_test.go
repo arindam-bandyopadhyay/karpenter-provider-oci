@@ -9,6 +9,8 @@ package orphaninstance
 
 import (
 	"context"
+	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -302,6 +304,67 @@ var _ = Describe("orphanInstanceController", func() {
 			Expect(node.Spec.Unschedulable).Should(BeTrue())
 			Expect(count).Should(Equal(0))
 		})
+
+	It("preserves multiple reclaim errors from parallel workers", func() {
+		err1 := errors.New("delete nc1")
+		err2 := errors.New("delete nc2")
+
+		fakeCloudProvider.ListStub = func(ctx2 context.Context) ([]*corev1.NodeClaim, error) {
+			return []*corev1.NodeClaim{
+				miniNodeClaims("nc1", "id1"),
+				miniNodeClaims("nc2", "id2"),
+				miniNodeClaims("nc3", "id3"),
+			}, nil
+		}
+		fakeCloudProvider.DeleteStub = func(ctx2 context.Context, claim *corev1.NodeClaim) error {
+			switch claim.Name {
+			case "nc1":
+				return err1
+			case "nc2":
+				return err2
+			default:
+				return nil
+			}
+		}
+
+		_, err := c.Reconcile(ctx)
+		Expect(err).Should(HaveOccurred())
+		Expect(errors.Is(err, err1)).Should(BeTrue())
+		Expect(errors.Is(err, err2)).Should(BeTrue())
+	})
+
+	It("returns fast requeue when any parallel reclaim is unfinished", func() {
+		fakeCloudProvider.ListStub = func(ctx2 context.Context) ([]*corev1.NodeClaim, error) {
+			return []*corev1.NodeClaim{
+				miniNodeClaims("nc-draining", "id-draining"),
+				miniNodeClaims("nc-delete", "id-delete"),
+			}, nil
+		}
+
+		lo.Must0(fakeControllerClient.Create(ctx, miniNode("nc-draining", "id-draining")))
+		pod := miniPod("pod1", "nc-draining")
+		lo.Must0(fakeControllerClient.Create(ctx, pod))
+		_, err := fakeKubernetesInterface.CoreV1().Pods("default").Create(ctx, pod, metav1.CreateOptions{})
+		Expect(err).ShouldNot(HaveOccurred())
+
+		var deleteCount atomic.Int32
+		fakeCloudProvider.DeleteStub = func(ctx2 context.Context, claim *corev1.NodeClaim) error {
+			deleteCount.Add(1)
+			return nil
+		}
+
+		requeue, err := c.Reconcile(ctx)
+		Expect(err).ShouldNot(HaveOccurred())
+		Expect(requeue.RequeueAfter).Should(Equal(fastRequeueAfter))
+		Expect(deleteCount.Load()).Should(Equal(int32(1)))
+
+		node := &v1.Node{}
+		getErr := fakeControllerClient.Get(ctx, client.ObjectKey{
+			Name: "nc-draining",
+		}, node)
+		Expect(getErr).ShouldNot(HaveOccurred())
+		Expect(node.Spec.Unschedulable).Should(BeTrue())
+	})
 
 	It("node claim mismatch, cloud has provider id different from node claim,"+
 		" node registered, non evictable pods running", func() {

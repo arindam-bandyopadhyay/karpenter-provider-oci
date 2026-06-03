@@ -9,9 +9,9 @@ set -euo pipefail
 PREBAKED_IMAGE_COMPARTMENT_ID="ocid1.compartment.oc1..aaaaaaaab4u67dhgtj5gpdpp3z42xqqsdnufxkatoild46u3hb67vzojfmzq"
 PREBAKED_IMAGE_COMPARTMENT_ID_UBUNTU="ocid1.compartment.oc1..aaaaaaaawapv5zqax243hxuvi5xs6ekpsntos2ylg2xyx6qnncctcab53hya"
 
-TENANCY_ID=$1
-COMPARTMENT_NAME=$2
-IMAGE_TAG=$3
+TENANCY_ID="$1"
+COMPARTMENT_NAME="$2"
+IMAGE_TAG="$3"
 
 # define constants
 DRIFT_COMPARTMENT_NAME="${DRIFT_COMPARTMENT_NAME:-karpenter-e2e-drift}"
@@ -57,25 +57,25 @@ if [[ -n "${ENDPOINT:-}" ]]; then
   CE_ENDPOINT_ARGS=(--endpoint "$ENDPOINT")
 fi
 
-export COMPARTMENT_ID=$(oci iam compartment list --all --compartment-id $TENANCY_ID --name $COMPARTMENT_NAME --query 'data[0].id' --raw-output)
-DRIFT_COMPARTMENT_ID=$(oci iam compartment list --all --compartment-id $COMPARTMENT_ID --name $DRIFT_COMPARTMENT_NAME --query 'data[0].id' --raw-output)
-KEYS_COMPARTMENT_ID=$(oci iam compartment list --all --compartment-id $TENANCY_ID --name $KEYS_COMPARTMENT_NAME --query 'data[0].id' --raw-output)
-VCN_ID=$(oci network vcn list --compartment-id $COMPARTMENT_ID --display-name karpenter_vcn --query 'data[0].id' --raw-output)
-NODE_SUBNET1_ID=$(oci network subnet list --compartment-id $COMPARTMENT_ID --vcn-id $VCN_ID --display-name $NODE_SUBNET1_NAME --query 'data[0].id' --raw-output)
-NODE_SUBNET2_ID=$(oci network subnet list --compartment-id $COMPARTMENT_ID --vcn-id $VCN_ID --display-name $NODE_SUBNET2_NAME --query 'data[0].id' --raw-output)
-VAULT_ID=$(oci kms management vault list --compartment-id $KEYS_COMPARTMENT_ID --query "data[?\"display-name\"=='$VAULT_NAME'].id | [0]" --raw-output)
-KMS_ENDPOINT=$(oci kms management vault get --vault-id $VAULT_ID --query 'data."management-endpoint"' --raw-output)
-KMS_KEY1_ID=$(oci kms management key list --endpoint $KMS_ENDPOINT --all --compartment-id $COMPARTMENT_ID --query "data[?\"display-name\"=='$KMS_KEY1_NAME' && \"lifecycle-state\"=='ENABLED'].id | [0]" --raw-output)
-KMS_KEY2_ID=$(oci kms management key list --endpoint $KMS_ENDPOINT --all --compartment-id $COMPARTMENT_ID --query "data[?\"display-name\"=='$KMS_KEY2_NAME' && \"lifecycle-state\"=='ENABLED'].id | [0]" --raw-output)
-NSG1_ID=$(oci network nsg list --compartment-id $COMPARTMENT_ID --vcn-id $VCN_ID --display-name $NSG1_NAME --query 'data[0].id' --raw-output)
-NSG2_ID=$(oci network nsg list --compartment-id $COMPARTMENT_ID --vcn-id $VCN_ID --display-name $NSG2_NAME --query 'data[0].id' --raw-output)
-CAPACITY_RESERVATION1_ID=$(oci compute capacity-reservation list --compartment-id $COMPARTMENT_ID --query "data[?\"display-name\"=='$CAPACITY_RESERVATION1_NAME'].id | [0]" --raw-output)
-CAPACITY_RESERVATION2_ID=$(oci compute capacity-reservation list --compartment-id $COMPARTMENT_ID --query "data[?\"display-name\"=='$CAPACITY_RESERVATION2_NAME'].id | [0]" --raw-output)
-COMPUTE_CLUSTER_ID=$(oci compute compute-cluster list --compartment-id $COMPARTMENT_ID --query "data.items[?\"display-name\"=='$COMPUTE_CLUSTER_NAME'].id | [0]" --raw-output)
-export NPN_CLUSTER_ID=$(oci ce cluster list "${CE_ENDPOINT_ARGS[@]}" --compartment-id $COMPARTMENT_ID --lifecycle-state ACTIVE --name $NPN_CLUSTER_NAME --query 'data[0].id' --raw-output)
-NPN_KUBEAPI_ENDPOINT_IP=$(oci ce cluster get "${CE_ENDPOINT_ARGS[@]}" --cluster-id $NPN_CLUSTER_ID --query 'data.endpoints' --raw-output | jq -r '.["private-endpoint"] | split(":")[0]' )
-export FLANNEL_CLUSTER_ID=$(oci ce cluster list "${CE_ENDPOINT_ARGS[@]}" --compartment-id $COMPARTMENT_ID --lifecycle-state ACTIVE --name $FLANNEL_CLUSTER_NAME --query 'data[0].id' --raw-output)
-FLANNEL_KUBEAPI_ENDPOINT_IP=$(oci ce cluster get "${CE_ENDPOINT_ARGS[@]}" --cluster-id $FLANNEL_CLUSTER_ID --query 'data.endpoints' --raw-output | jq -r '.["private-endpoint"] | split(":")[0]')
+export COMPARTMENT_ID=$(oci iam compartment list --all --compartment-id "$TENANCY_ID" --name "$COMPARTMENT_NAME" --query 'data[0].id' --raw-output)
+DRIFT_COMPARTMENT_ID=$(oci iam compartment list --all --compartment-id "$COMPARTMENT_ID" --name "$DRIFT_COMPARTMENT_NAME" --query 'data[0].id' --raw-output)
+KEYS_COMPARTMENT_ID=$(oci iam compartment list --all --compartment-id "$TENANCY_ID" --name "$KEYS_COMPARTMENT_NAME" --query 'data[0].id' --raw-output)
+VCN_ID=$(oci network vcn list --compartment-id "$COMPARTMENT_ID" --display-name karpenter_vcn --query 'data[0].id' --raw-output)
+NODE_SUBNET1_ID=$(oci network subnet list --compartment-id "$COMPARTMENT_ID" --vcn-id "$VCN_ID" --display-name "$NODE_SUBNET1_NAME" --query 'data[0].id' --raw-output)
+NODE_SUBNET2_ID=$(oci network subnet list --compartment-id "$COMPARTMENT_ID" --vcn-id "$VCN_ID" --display-name "$NODE_SUBNET2_NAME" --query 'data[0].id' --raw-output)
+VAULT_ID=$(oci kms management vault list --compartment-id "$KEYS_COMPARTMENT_ID" --query "data[?\"display-name\"=='$VAULT_NAME'].id | [0]" --raw-output)
+KMS_ENDPOINT=$(oci kms management vault get --vault-id "$VAULT_ID" --query 'data."management-endpoint"' --raw-output)
+KMS_KEY1_ID=$(oci kms management key list --endpoint "$KMS_ENDPOINT" --all --compartment-id "$COMPARTMENT_ID" --query "data[?\"display-name\"=='$KMS_KEY1_NAME' && \"lifecycle-state\"=='ENABLED'].id | [0]" --raw-output)
+KMS_KEY2_ID=$(oci kms management key list --endpoint "$KMS_ENDPOINT" --all --compartment-id "$COMPARTMENT_ID" --query "data[?\"display-name\"=='$KMS_KEY2_NAME' && \"lifecycle-state\"=='ENABLED'].id | [0]" --raw-output)
+NSG1_ID=$(oci network nsg list --compartment-id "$COMPARTMENT_ID" --vcn-id "$VCN_ID" --display-name "$NSG1_NAME" --query 'data[0].id' --raw-output)
+NSG2_ID=$(oci network nsg list --compartment-id "$COMPARTMENT_ID" --vcn-id "$VCN_ID" --display-name "$NSG2_NAME" --query 'data[0].id' --raw-output)
+CAPACITY_RESERVATION1_ID=$(oci compute capacity-reservation list --compartment-id "$COMPARTMENT_ID" --query "data[?\"display-name\"=='$CAPACITY_RESERVATION1_NAME'].id | [0]" --raw-output)
+CAPACITY_RESERVATION2_ID=$(oci compute capacity-reservation list --compartment-id "$COMPARTMENT_ID" --query "data[?\"display-name\"=='$CAPACITY_RESERVATION2_NAME'].id | [0]" --raw-output)
+COMPUTE_CLUSTER_ID=$(oci compute compute-cluster list --compartment-id "$COMPARTMENT_ID" --query "data.items[?\"display-name\"=='$COMPUTE_CLUSTER_NAME'].id | [0]" --raw-output)
+export NPN_CLUSTER_ID=$(oci ce cluster list "${CE_ENDPOINT_ARGS[@]}" --compartment-id "$COMPARTMENT_ID" --lifecycle-state ACTIVE --name "$NPN_CLUSTER_NAME" --query 'data[0].id' --raw-output)
+NPN_KUBEAPI_ENDPOINT_IP=$(oci ce cluster get "${CE_ENDPOINT_ARGS[@]}" --cluster-id "$NPN_CLUSTER_ID" --query 'data.endpoints' --raw-output | jq -r '.["private-endpoint"] | split(":")[0]' )
+export FLANNEL_CLUSTER_ID=$(oci ce cluster list "${CE_ENDPOINT_ARGS[@]}" --compartment-id "$COMPARTMENT_ID" --lifecycle-state ACTIVE --name "$FLANNEL_CLUSTER_NAME" --query 'data[0].id' --raw-output)
+FLANNEL_KUBEAPI_ENDPOINT_IP=$(oci ce cluster get "${CE_ENDPOINT_ARGS[@]}" --cluster-id "$FLANNEL_CLUSTER_ID" --query 'data.endpoints' --raw-output | jq -r '.["private-endpoint"] | split(":")[0]')
 
 # print out the variables
 echo "TENANCY_ID: $TENANCY_ID"

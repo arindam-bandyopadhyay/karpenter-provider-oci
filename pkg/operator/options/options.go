@@ -163,7 +163,7 @@ func (o *Options) Parse(fs *coreoptions.FlagSet, args ...string) error {
 			env, envOk := os.LookupEnv(envName)
 
 			if envOk {
-				log.Printf("env variable: %s, %s", envName, env)
+				log.Printf("env variable set: %s", envName)
 
 				err := f.Value.Set(env)
 				if err != nil {

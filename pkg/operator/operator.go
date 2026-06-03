@@ -10,7 +10,6 @@ package operator
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"os/user"
 	"time"
@@ -71,8 +70,6 @@ type Operator struct {
 
 func NewOperator(ctx context.Context, coreOp *operator.Operator) (context.Context, *Operator) {
 	ociOptions := options.FromContext(ctx)
-	log.Printf("option address: %p, ctx address: %p", ociOptions, ctx)
-	log.Printf("option in newOperator: %p, %v", ociOptions, ociOptions)
 	lo.Must0(ociOptions.Validate())
 
 	restConfig := config.GetConfigOrDie()

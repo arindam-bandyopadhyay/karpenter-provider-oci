@@ -48,6 +48,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+const conflictRequeueAfter = time.Second
+
 // OCINodeClassReconciler reconciles a OCINodeClass object
 type Controller struct {
 	client.Client
@@ -120,7 +122,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClass *v1beta1.OCINodeCl
 		if err := c.Client.Patch(ctx, nodeClass,
 			client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
 			if errors.IsConflict(err) {
-				return reconcile.Result{Requeue: true}, nil
+				return reconcile.Result{RequeueAfter: conflictRequeueAfter}, nil
 			}
 
 			return reconcile.Result{}, err
@@ -138,9 +140,10 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClass *v1beta1.OCINodeCl
 		results = append(results, res)
 	}
 
-	log.Info(fmt.Sprintf("post reconcile: %v", nodeClass))
+	changed := !equality.Semantic.DeepEqual(stored, nodeClass)
+	log.Info("post reconcile", "name", nodeClass.Name, "changed", changed)
 
-	if !equality.Semantic.DeepEqual(stored, nodeClass) {
+	if changed {
 		newHash, foundNewHash := nodeClass.Annotations[v1beta1.NodeClassHash]
 		existingHash, foundExistingHash := stored.Annotations[v1beta1.NodeClassHash]
 
@@ -149,7 +152,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClass *v1beta1.OCINodeCl
 			if err := c.Client.Patch(ctx, annotationPatchOnly,
 				client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
 				if errors.IsConflict(err) {
-					return reconcile.Result{Requeue: true}, nil
+					return reconcile.Result{RequeueAfter: conflictRequeueAfter}, nil
 				}
 				errs = multierr.Append(errs, client.IgnoreNotFound(err))
 			}
@@ -164,7 +167,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClass *v1beta1.OCINodeCl
 		if err := c.Client.Status().Patch(ctx, nodeClass,
 			client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
 			if errors.IsConflict(err) {
-				return reconcile.Result{Requeue: true}, nil
+				return reconcile.Result{RequeueAfter: conflictRequeueAfter}, nil
 			}
 			errs = multierr.Append(errs, client.IgnoreNotFound(err))
 		}
@@ -241,7 +244,7 @@ func (c *Controller) finalize(ctx context.Context, nodeClass *v1beta1.OCINodeCla
 		if err := c.Client.Patch(ctx, nodeClass,
 			client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
 			if errors.IsConflict(err) {
-				return reconcile.Result{Requeue: true}, nil
+				return reconcile.Result{RequeueAfter: conflictRequeueAfter}, nil
 			}
 			return reconcile.Result{}, client.IgnoreNotFound(fmt.Errorf("removing termination finalizer, %w", err))
 		}

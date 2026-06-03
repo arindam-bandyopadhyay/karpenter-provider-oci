@@ -50,7 +50,7 @@ A Helm chart for Karpenter provider OCI
 | podDisruptionBudget.name | string | `"karpenter"` | PodDisruptionBudget name. |
 | podDisruptionBudget.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` | Controls whether unhealthy pods are considered for eviction during voluntary disruptions. |
 | podLabels | object | `{}` | Additional labels for the pod. |
-| podSecurityContext | object | `{}` | Pod-level security context. |
+| podSecurityContext | object | `{"fsGroup":65532,"runAsGroup":65532,"seccompProfile":{"type":"RuntimeDefault"}}` | Pod-level security context. |
 | priorityClassName | string | `"system-cluster-critical"` | PriorityClass name for the pod. |
 | readinessProbe.httpGet.path | string | `"/"` | HTTP path used by the readiness probe. |
 | readinessProbe.httpGet.port | string | `"http"` | Named container port used by the readiness probe. |
